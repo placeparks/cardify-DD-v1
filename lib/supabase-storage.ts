@@ -234,7 +234,13 @@ export async function uploadToSupabase(
     // non-fatal
   }
 
-  return { success: true, publicUrl, storagePath, imageRecordId: rec?.id ?? null };
+  return { 
+    success: true, 
+    publicUrl, 
+    storagePath, 
+    imageRecordId: rec?.id ?? null,
+    duplicateCheckResult 
+  };
 }
 
 /**

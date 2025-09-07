@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { track } from "../../lib/analytics-client"
+import { ListingDescriptionPopup } from '@/components/listing-description-popup'
 
 type ListingRow = {
   id: string
@@ -698,10 +699,18 @@ const handleBuy = useCallback(
                   <div className="flex-1 space-y-4">
                   {/* Description */}
                   {selectedListing.description && (
-                    <div>
-                      <h3 className="text-sm text-gray-400 mb-2">Description</h3>
-                      <p className="text-white">{selectedListing.description}</p>
-                    </div>
+                    selectedListing.description === 'AI Generated' ? (
+                      <div>
+                        <h3 className="text-sm text-gray-400 mb-2">Description</h3>
+                        <p className="text-white">{selectedListing.description}</p>
+                      </div>
+                    ) : (
+                      <ListingDescriptionPopup 
+                        description={selectedListing.description}
+                        title={selectedListing.title}
+                        maxLength={200}
+                      />
+                    )
                   )}
                   
                   {/* Price and Status */}

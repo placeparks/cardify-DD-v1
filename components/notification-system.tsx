@@ -265,7 +265,7 @@ export const notificationHelpers = {
     description: `${fileName} has been uploaded successfully.`,
     action: {
       label: 'View in Gallery',
-      onClick: () => window.location.href = '/gallery'
+      onClick: () => window.location.href = '/profile'
     }
   }),
   

@@ -425,20 +425,11 @@ const handleFileUpload = useCallback(async (file: File) => {
       // Check if upload was blocked due to duplicate
       console.log('🔍 Upload result:', result);
       console.log('🔍 Duplicate check result:', result.duplicateCheckResult);
-      console.log('🔍 Result success:', result.success);
-      console.log('🔍 Result error:', result.error);
-      console.log('🔍 Result message:', result.message);
       if (!result.success) {
         if (result.error === 'duplicate_image') {
           const errorMsg = result.message || 'This image appears to be a duplicate.';
           console.log('🚨 Duplicate detected:', errorMsg);
           setUploadError(errorMsg);
-          showNotification({
-            type: 'error',
-            title: 'Duplicate Image Detected',
-            description: errorMsg,
-            duration: 5000,
-          });
           toast({
             title: "Duplicate Image Detected",
             description: errorMsg,
@@ -460,17 +451,11 @@ const handleFileUpload = useCallback(async (file: File) => {
       }
       
       // Check if upload was flagged for review (first duplicate)
-      console.log('🔍 Checking duplicate check result:', result.success, result.duplicateCheckResult);
-      if (result.success && result.duplicateCheckResult && result.duplicateCheckResult.action === 'flag') {
-        const warningMsg = result.duplicateCheckResult.message || 'Similar image detected - this will be reviewed by our team.';
+      // TODO: Check the actual structure of duplicateCheckResult from console logs
+      if (result.success && result.duplicateCheckResult && (result.duplicateCheckResult as any).flagged_for_review) {
+        const warningMsg = result.message || 'Similar image detected - this will be reviewed by our team.';
         console.log('⚠️ Upload flagged for review:', warningMsg);
         setUploadError(warningMsg);
-        showNotification({
-          type: 'warning',
-          title: 'Image Flagged for Review',
-          description: warningMsg,
-          duration: 5000,
-        });
         toast({
           title: "Image Flagged for Review",
           description: warningMsg,
@@ -492,6 +477,7 @@ const handleFileUpload = useCallback(async (file: File) => {
         performance.now() - t0
       )
 
+      // Hide loading notification (disabled - no popup)
 
       // Soft refresh credits and upload status in case Realtime lags
       try {
@@ -636,17 +622,10 @@ const finishOrRedirect = async (): Promise<void> => {
     console.log('🔍 Finalize duplicate check result:', result.duplicateCheckResult);
     if (!result.success) {
       if (result.error === 'duplicate_image') {
-        const errorMsg = result.message || 'This image appears to be a duplicate.';
-        setUploadError(errorMsg);
-        showNotification({
-          type: 'error',
-          title: 'Duplicate Image Detected',
-          description: errorMsg,
-          duration: 5000,
-        });
+        setUploadError(result.message || 'This image appears to be a duplicate.');
         toast({
           title: "Duplicate Image Detected",
-          description: errorMsg,
+          description: result.message || 'This image appears to be a duplicate.',
           variant: "destructive",
         });
       } else {
@@ -661,16 +640,11 @@ const finishOrRedirect = async (): Promise<void> => {
     }
     
     // Check if upload was flagged for review (first duplicate)
-    if (result.success && result.duplicateCheckResult && result.duplicateCheckResult.action === 'flag') {
-      const warningMsg = result.duplicateCheckResult.message || 'Similar image detected - this will be reviewed by our team.';
+    // TODO: Check the actual structure of duplicateCheckResult from console logs
+    if (result.success && result.duplicateCheckResult && (result.duplicateCheckResult as any).flagged_for_review) {
+      const warningMsg = result.message || 'Similar image detected - this will be reviewed by our team.';
       console.log('⚠️ Finalize upload flagged for review:', warningMsg);
       setUploadError(warningMsg);
-      showNotification({
-        type: 'warning',
-        title: 'Image Flagged for Review',
-        description: warningMsg,
-        duration: 5000,
-      });
       toast({
         title: "Image Flagged for Review",
         description: warningMsg,
@@ -1097,6 +1071,12 @@ const finishOrRedirect = async (): Promise<void> => {
                             </span>
                           </div>
 
+                          {/* Status Message */}
+                          <div className="p-2 bg-gray-800/50 border border-gray-600 rounded">
+                            <p className="text-cyber-cyan text-xs text-center">
+                              {uploadStatus.message}
+                            </p>
+                          </div>
 
                           {/* Purchase Package Button */}
                           {uploadStatus.next_package_cost > 0 && (
@@ -1248,53 +1228,57 @@ artwork={uploadedImageUrl || (isUploading ? null : uploadedImage)}
                 ) : uploadStatus ? (
                                     <>
                     {/* Upload Count */}
-                    <div className="flex items-center justify-between p-3 bg-cyber-cyan/10 border border-cyber-cyan/30 rounded">
-                      <span className="text-gray-300 text-sm sm:text-base flex items-center gap-2">
-                        <Upload className="w-4 h-4 text-cyber-cyan flex-shrink-0" />
-                        <span className="truncate">Total Uploads</span>
+                    <div className="flex items-center justify-between p-2 bg-cyber-cyan/10 border border-cyber-cyan/30 rounded">
+                      <span className="text-gray-300 text-sm flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-cyber-cyan" />
+                        Total Uploads
                       </span>
-                      <span className="text-cyber-cyan font-mono font-semibold text-lg">
+                      <span className="text-cyber-cyan font-mono font-semibold">
                         {uploadStatus.upload_count}
                       </span>
                     </div>
 
                     {/* Package Info */}
-                    <div className="flex items-center justify-between p-3 bg-cyber-green/10 border border-cyber-green/30 rounded">
-                      <span className="text-gray-300 text-sm sm:text-base flex items-center gap-2">
-                        <Package className="w-4 h-4 text-cyber-green flex-shrink-0" />
-                        <span className="truncate">Packages</span>
+                    <div className="flex items-center justify-between p-2 bg-cyber-green/10 border border-cyber-green/30 rounded">
+                      <span className="text-gray-300 text-sm flex items-center gap-2">
+                        <Package className="w-4 h-4 text-cyber-green" />
+                        Packages Purchased
                       </span>
-                      <span className="text-cyber-green font-mono font-semibold text-lg">
+                      <span className="text-cyber-green font-mono font-semibold">
                         {uploadStatus.upload_package_count}
                       </span>
                     </div>
 
                     {/* Remaining Uploads */}
-                    <div className="flex items-center justify-between p-3 bg-cyber-orange/10 border border-cyber-orange/30 rounded">
-                      <span className="text-gray-300 text-sm sm:text-base flex items-center gap-2">
-                        <span className="truncate">Remaining</span>
-                      </span>
-                      <span className="text-cyber-orange font-mono font-semibold text-lg">
+                    <div className="flex items-center justify-between p-2 bg-cyber-orange/10 border border-cyber-orange/30 rounded">
+                      <span className="text-gray-300 text-sm">Remaining Uploads</span>
+                      <span className="text-cyber-orange font-mono font-semibold">
                         {uploadStatus.remaining_uploads}
                       </span>
                     </div>
 
+                    {/* Status Message */}
+                    <div className="p-2 bg-gray-800/50 border border-gray-600 rounded">
+                      <p className="text-cyber-cyan text-xs text-center">
+                        {uploadStatus.message}
+                      </p>
+                    </div>
 
                     {/* Purchase Package Button */}
                     {uploadStatus.next_package_cost > 0 && (
                       <div className="space-y-3">
-                        <div className="p-3 bg-cyber-pink/10 border border-cyber-pink/30 rounded">
-                          <p className="text-cyber-pink text-xs sm:text-sm mb-2 text-center font-medium">
+                        <div className="p-2 bg-cyber-pink/10 border border-cyber-pink/30 rounded">
+                          <p className="text-cyber-pink text-xs mb-2 text-center">
                             {uploadStatus.next_package_cost === 1 ? 'First time user - get 25 uploads!' : 'Need more uploads!'}
                           </p>
-                          <p className="text-cyber-pink text-xs sm:text-sm text-center">
+                          <p className="text-cyber-pink text-xs text-center">
                             {uploadStatus.next_package_cost === 1 ? `${formatCreditsWithDollars(1)} for 25 uploads` : `${formatCreditsWithDollars(uploadStatus.next_package_cost)} for 10 uploads`}
                           </p>
                         </div>
                         <Button
                           onClick={purchaseUploadPackage}
                           disabled={isPurchasingPackage}
-                          className={`w-full text-sm sm:text-base ${
+                          className={`w-full ${
                             credits < (uploadStatus?.next_package_cost || 1)
                               ? 'bg-red-600 hover:bg-red-700 text-white border border-red-500/50'
                               : 'cyber-button'
@@ -1302,8 +1286,8 @@ artwork={uploadedImageUrl || (isUploading ? null : uploadedImage)}
                         >
                           {isPurchasingPackage ? "Purchasing..." : 
                             credits < (uploadStatus?.next_package_cost || 1)
-                              ? `Need ${uploadStatus?.next_package_cost || 1} Credit${(uploadStatus?.next_package_cost || 1) !== 1 ? 's' : ''}`
-                              : `Buy Package (${uploadStatus.next_package_cost} credit${uploadStatus.next_package_cost !== 1 ? 's' : ''})`
+                              ? `Need ${uploadStatus?.next_package_cost || 1} Credit${(uploadStatus?.next_package_cost || 1) !== 1 ? 's' : ''} - Go to Credits Page`
+                              : `Purchase Package (${uploadStatus.next_package_cost} credit${uploadStatus.next_package_cost !== 1 ? 's' : ''} for ${uploadStatus.next_package_cost === 1 ? '25' : '10'} uploads)`
                           }
                         </Button>
                         <div className="text-center">

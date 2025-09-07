@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -24,9 +25,10 @@ import { useOwnedCardify } from "@/hooks/useOwnedCardify"
 import NFTCard from "@/components/NFTCard"
 import { WalletButton } from "@/components/WalletConnect"
 import AvatarUploader from "@/components/AvatarUploader"
-import { Pencil, Check, X, Sparkles, Trash2,XCircle, Loader2, AlertTriangle, ChevronDown, Upload, Plus, Package, CheckCircle } from "lucide-react"
+import { Pencil, Check, X, Sparkles, Trash2,XCircle, Loader2, AlertTriangle, ChevronDown, Upload, Plus, Package, CheckCircle, MessageSquare } from "lucide-react"
 import { Lightbox } from "@/components/ui/lightbox"
 import { CustomCardCheckoutModal } from "@/components/custom-card-checkout-modal"
+import { getDollarValue } from "@/lib/utils"
 
 const FACTORY = process.env.NEXT_PUBLIC_FACTORY_ADDRESS as `0x${string}`
 
@@ -89,8 +91,11 @@ type ListingRow = {
   id: string
   asset_id: string
   seller_id: string
-  status: "active" | "inactive"
+  title: string
+  description: string | null
   price_cents: number
+  currency: string
+  status: 'active' | 'sold' | 'inactive'
 }
 
 export default function Profile() {
@@ -121,11 +126,6 @@ export default function Profile() {
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  const canSell = true // Anyone can sell now - no Stripe Connect required
-  const totalMb = useMemo(
-    () => assets.reduce((s, a) => s + (a.file_size ?? 0) / (1024 * 1024), 0),
-    [assets]
-  )
 
   // Avatar
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -177,6 +177,7 @@ type PurchaseTransaction = {
     description: string | null
     imageUrl: string
     assetTitle: string
+    assetType: string | null // Added for purchase title cleaning
   }
 }
 
@@ -198,13 +199,19 @@ const [loadingTransactionHistory, setLoadingTransactionHistory] = useState<boole
 const [totalSales, setTotalSales] = useState<number>(0)
 const [totalRevenue, setTotalRevenue] = useState<number>(0)
 const [loadingSales, setLoadingSales] = useState<boolean>(true)
-const [totalSalesCount, setTotalSalesCount] = useState<number>(0) // Total sales (all time)
-const [requestedAmount, setRequestedAmount] = useState<number>(0) // Amount under request
-const [userCredits, setUserCredits] = useState<number>(0) // User's current credits balance
+const [totalSalesCount, setTotalSalesCount] = useState<number>(0) 
+const [requestedAmount, setRequestedAmount] = useState<number>(0) 
+const [userCredits, setUserCredits] = useState<number>(0)
 
 // Duplicate detection states
 const [duplicateDetections, setDuplicateDetections] = useState<Record<string, any>>({})
 const [loadingDuplicates, setLoadingDuplicates] = useState<boolean>(false)
+
+// Feedback modal states
+const [feedbackOpen, setFeedbackOpen] = useState(false)
+const [feedbackSubject, setFeedbackSubject] = useState("")
+const [feedbackMessage, setFeedbackMessage] = useState("")
+const [submittingFeedback, setSubmittingFeedback] = useState(false)
 
 // Revenue request modal states
 const [revenueRequestOpen, setRevenueRequestOpen] = useState(false)
@@ -263,6 +270,62 @@ const confirmDelete = async () => {
   setTargetAsset(null)
 }
 
+const submitFeedback = async () => {
+  if (!feedbackSubject.trim() || !feedbackMessage.trim()) {
+    toast({
+      title: "Missing Information",
+      description: "Please fill in both subject and message fields.",
+      variant: "destructive",
+    })
+    return
+  }
+
+  setSubmittingFeedback(true)
+  
+  try {
+    const response = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subject: feedbackSubject.trim(),
+        message: feedbackMessage.trim(),
+      }),
+    })
+
+    const result = await response.json()
+
+    if (result.success) {
+      toast({
+        title: "Feedback Submitted",
+        description: "Thank you for your feedback! We'll review it and get back to you soon.",
+        variant: "default",
+      })
+      
+      // Reset form and close modal
+      setFeedbackSubject("")
+      setFeedbackMessage("")
+      setFeedbackOpen(false)
+    } else {
+      toast({
+        title: "Submission Failed",
+        description: result.error || "Failed to submit feedback. Please try again.",
+        variant: "destructive",
+      })
+    }
+  } catch (error) {
+    console.error('Error submitting feedback:', error)
+    toast({
+      title: "Submission Failed",
+      description: "An error occurred while submitting your feedback. Please try again.",
+      variant: "destructive",
+    })
+  } finally {
+    setSubmittingFeedback(false)
+  }
+}
+
   const showGreeting = (name: string) => {
     const greetings = [
       `Hey ${name}!`,
@@ -283,11 +346,11 @@ const confirmDelete = async () => {
       return
     }
     const { data, error } = await supabase
-      .from("marketplace_listings") // Updated table name
-      .select("id, asset_id, seller_id, status, price_cents") // Updated column names
+      .from("marketplace_listings") 
+      .select("id, asset_id, seller_id, title, description, price_cents, currency, status")
       .eq("seller_id", userId)
-      .in("asset_id", assetIds) // Updated column name
-      .eq("status", "active") // Updated status value
+      .in("asset_id", assetIds)
+      .eq("status", "active") 
       .returns<ListingRow[]>()
     if (error) {
       console.error(error)
@@ -295,7 +358,7 @@ const confirmDelete = async () => {
       return
     }
     const map: Record<string, ListingRow> = {}
-    for (const row of data ?? []) map[row.asset_id] = row // Updated column name
+    for (const row of data ?? []) map[row.asset_id] = row 
     setListingBySource(map)
   }
 
@@ -651,7 +714,7 @@ async function convertRevenueToCredits() {
         revenue_request_id: revenueRequestId
       })
       .in('id', saleIds)
-      .eq('revenue_status', 'available') // Only update available sales, not payment_requested ones
+      .eq('revenue_status', 'available') 
 
     if (assetBuyersError) {
       console.error('Error updating asset_buyers:', assetBuyersError)
@@ -897,7 +960,8 @@ async function fetchPurchases(userId: string) {
         description,
         user_assets!inner(
           image_url,
-          title
+          title,
+          asset_type
         )
       `)
       .in('id', listingIds)
@@ -927,7 +991,8 @@ async function fetchPurchases(userId: string) {
           title: listing?.title,
           description: listing?.description,
           imageUrl: listing?.user_assets?.image_url,
-          assetTitle: listing?.user_assets?.title
+          assetTitle: listing?.user_assets?.title,
+          assetType: listing?.user_assets?.asset_type
         }
       }
     })
@@ -961,6 +1026,70 @@ function getCleanCardDescription(title: string | null | undefined): string {
   // For regular titles, truncate if too long
   if (title.length > 50) {
     return title.substring(0, 50) + '...'
+  }
+  
+  return title
+}
+
+// Helper function to generate random names for AI-generated cards
+function generateRandomCardName(): string {
+  const adjectives = ['Epic', 'Mystic', 'Legendary', 'Ancient', 'Cosmic', 'Shadow', 'Crystal', 'Dragon', 'Phoenix', 'Storm', 'Frost', 'Flame', 'Thunder', 'Lightning', 'Star', 'Moon', 'Sun', 'Ocean', 'Forest', 'Mountain']
+  const nouns = ['Warrior', 'Mage', 'Knight', 'Dragon', 'Phoenix', 'Tiger', 'Lion', 'Wolf', 'Eagle', 'Bear', 'Shark', 'Serpent', 'Spirit', 'Guardian', 'Champion', 'Hero', 'Beast', 'Creature', 'Monster', 'Legend']
+  
+  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)]
+  const noun = nouns[Math.floor(Math.random() * nouns.length)]
+  
+  return `${adjective} ${noun}`
+}
+
+// Helper function to clean up generation titles
+function getCleanGenerationTitle(title: string | null | undefined): string {
+  if (!title) return 'AI Generated'
+  
+  // If it's a very long title (likely an AI generation prompt), show a random name
+  if (title.length > 100) {
+    return generateRandomCardName()
+  }
+  
+  // If it contains common AI generation keywords, show a random name
+  const aiKeywords = ['Create a fully designed', 'Generate', 'AI', 'prompt', 'aspect ratio', 'trading card image']
+  if (aiKeywords.some(keyword => title.toLowerCase().includes(keyword.toLowerCase()))) {
+    return generateRandomCardName()
+  }
+  
+  // For regular titles, truncate if too long
+  if (title.length > 50) {
+    return title.substring(0, 50) + '...'
+  }
+  
+  return title
+}
+
+// Helper function to clean up card titles for purchases display
+// Shows "AI Generated" for AI-generated cards, or the seller's custom name for uploaded cards
+function getCleanPurchaseTitle(title: string | null | undefined, assetType: string | null | undefined): string {
+  if (!title) return 'Unknown Card'
+  
+  // If it's an AI-generated card, show "AI Generated"
+  if (assetType === 'generated') {
+    return 'AI Generated'
+  }
+  
+  // If it's a very long title (likely an AI generation prompt), show "AI Generated"
+  if (title.length > 100) {
+    return 'AI Generated'
+  }
+  
+  // If it contains common AI generation keywords, show "AI Generated"
+  const aiKeywords = ['Create a fully designed', 'Generate', 'AI', 'prompt', 'aspect ratio', 'trading card image']
+  if (aiKeywords.some(keyword => title.toLowerCase().includes(keyword.toLowerCase()))) {
+    return 'AI Generated'
+  }
+  
+  // For user-uploaded cards, use the title as-is (it should be the seller's custom name)
+  // Truncate if too long for display
+  if (title.length > 30) {
+    return title.substring(0, 30) + '...'
   }
   
   return title
@@ -1246,18 +1375,18 @@ const deduped = useMemo(() => {
     const key = a.file_path;              // storage_path is unique per file
     const prev = map.get(key);
     if (!prev) map.set(key, a);
-    else if (a.isGenerated && !prev.isGenerated) map.set(key, a); // keep generated copy
+    else if (a.isGenerated && !prev.isGenerated) map.set(key, a); 
   }
   return Array.from(map.values());
 }, [assets]);
 
 const uploads = useMemo(
-  () => deduped.filter((a) => !a.isGenerated && a.asset_type === "uploaded"), // Updated column name and value
+  () => deduped.filter((a) => !a.isGenerated && a.asset_type === "uploaded"),
   [deduped],
 );
 
 const generations = useMemo(
-  () => deduped.filter((a) => a.isGenerated || a.asset_type === "generated"), // Updated column name and value
+  () => deduped.filter((a) => a.isGenerated || a.asset_type === "generated"),
   [deduped],
 );
 
@@ -1310,9 +1439,9 @@ const generations = useMemo(
     const { data } = await supabase
       .from("user_assets")
       .select(
-        "id, user_id, asset_type, title, image_url, storage_path, mime_type, file_size_bytes, created_at", // Updated column names
+        "id, user_id, asset_type, title, image_url, storage_path, mime_type, file_size_bytes, created_at",
       )
-      .eq("user_id", uid) // Updated column name
+      .eq("user_id", uid) 
       .order("created_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1)
       .returns<AssetRow[]>()
@@ -1402,12 +1531,12 @@ const generations = useMemo(
     const { data, error } = await supabase
       .from("marketplace_listings") // Updated table name
       .insert({
-        title: selectedAsset.file_name,
-        description: `Card: ${selectedAsset.file_name}`, // Add description
+        title: getCleanGenerationTitle(selectedAsset.file_name),
+        description: getCleanGenerationTitle(selectedAsset.file_name), // Use clean title for description too
         price_cents: FIXED_PRICE_USD * 100,
         seller_id: uid,
-        status: "active", // Updated status value
-        asset_id: selectedAsset.id, // Updated column name
+        status: "active",
+        asset_id: selectedAsset.id, 
       })
       .select("id, asset_id, seller_id, status, price_cents") // Updated column names
       .returns<ListingRow[]>()
@@ -1427,7 +1556,7 @@ const generations = useMemo(
     }
     const row = data?.[0]
     if (row) setListingBySource((prev) => ({ ...prev, [row.asset_id]: row })) // Updated column name
-    toast({ title: "Listed for sale", description: `${selectedAsset.file_name} • $${FIXED_PRICE_USD}.00` })
+    toast({ title: "Listed for sale", description: `${getCleanGenerationTitle(selectedAsset.file_name)} • $${FIXED_PRICE_USD}.00` })
     setSellOpen(false)
     setSelectedAsset(null)
   }
@@ -1527,7 +1656,7 @@ const deleteAsset = async (a: UIAsset) => {
   
   // Show confirmation dialog
   const confirmed = await showConfirmation({
-    ...notificationHelpers.deleteAsset(a.file_name),
+    ...notificationHelpers.deleteAsset(getCleanGenerationTitle(a.file_name)),
     onConfirm: () => {}, // This will be replaced by the confirmation system
     onCancel: () => {}
   })
@@ -1562,7 +1691,7 @@ const deleteAsset = async (a: UIAsset) => {
     showNotification({
       type: 'success',
       title: 'Asset Deleted',
-      description: `${a.file_name} has been removed from your profile.`,
+      description: `${getCleanGenerationTitle(a.file_name)} has been removed from your profile.`,
     })
   } finally {
     setDeletingId(null)
@@ -1893,7 +2022,7 @@ return (
 
       {/* Tabs for different views */}
       <Tabs defaultValue="cards" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-cyber-dark/60 border border-cyber-cyan/30 mb-4 sm:mb-8 h-12 sm:h-auto">
+        <TabsList className="grid w-full grid-cols-4 bg-cyber-dark/60 border border-cyber-cyan/30 mb-4 sm:mb-8 h-12 sm:h-auto">
           <TabsTrigger 
             value="cards" 
             className="data-[state=active]:bg-cyber-cyan/20 data-[state=active]:text-cyber-cyan data-[state=active]:border-cyber-cyan/50 text-gray-400 hover:text-white transition-colors text-xs sm:text-sm px-2 sm:px-4 py-2"
@@ -1913,6 +2042,13 @@ return (
           >
             <span className="hidden sm:inline">Transaction History</span>
             <span className="sm:hidden">History</span>
+          </TabsTrigger>
+          <TabsTrigger 
+            value="feedback" 
+            className="data-[state=active]:bg-cyber-cyan/20 data-[state=active]:text-cyber-cyan data-[state=active]:border-cyber-cyan/50 text-gray-400 hover:text-white transition-colors text-xs sm:text-sm px-2 sm:px-4 py-2"
+          >
+            <MessageSquare className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Feedback</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1962,11 +2098,11 @@ return (
             setUploadsLightboxOpen(true)
           }}
           className="block relative aspect-[5/7] bg-gradient-to-br from-cyber-dark/40 to-cyber-dark/80 rounded-lg overflow-hidden cursor-pointer group w-full border-2 border-cyber-cyan/50 transition-all duration-300 hover:border-cyber-cyan touch-manipulation"
-          title={u.file_name}
+          title={getCleanGenerationTitle(u.file_name)}
         >
           <Image
             src={u.public_url || PLACEHOLDER}
-            alt={u.file_name}
+            alt={getCleanGenerationTitle(u.file_name)}
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 20vw"
             className="object-fill"
@@ -2021,15 +2157,15 @@ return (
             </div>
           ) : (
             <div className="flex items-center gap-1 group/title">
-              <h3 className="text-xs sm:text-sm font-semibold text-white truncate flex-1" title={u.file_name}>
-                {u.file_name}
+              <h3 className="text-xs sm:text-sm font-semibold text-white truncate flex-1" title={getCleanGenerationTitle(u.file_name)}>
+                {getCleanGenerationTitle(u.file_name)}
               </h3>
               <Button
                 size="icon"
                 className="h-8 w-8 sm:h-7 sm:w-7 min-w-[2rem] sm:min-w-[1.75rem] border border-cyber-cyan/30 bg-cyber-dark/60 hover:bg-white/5 opacity-0 group-hover/title:opacity-100 sm:opacity-0 sm:group-hover/title:opacity-100 transition-opacity flex-shrink-0 touch-manipulation"
                 onClick={() => {
                   setRenameId(u.id)
-                  setDraftTitle(u.file_name)
+                  setDraftTitle(getCleanGenerationTitle(u.file_name))
                 }}
                 title="Rename"
               >
@@ -2046,6 +2182,7 @@ return (
               </Badge>
             )}
           </div>
+          
 
           {/* Duplicate Detection Status */}
           {duplicateDetections[u.id] && (
@@ -2256,11 +2393,11 @@ return (
                     setLightboxOpen(true)
                   }}
                   className="block relative aspect-[5/7] bg-gradient-to-br from-cyber-dark/40 to-cyber-dark/80 rounded-lg overflow-hidden cursor-pointer group w-full border-2 border-cyber-cyan/50 transition-all duration-300 hover:border-cyber-cyan touch-manipulation"
-                  title={a.file_name}
+                  title={getCleanGenerationTitle(a.file_name)}
                 >
                   <Image
                     src={a.public_url || PLACEHOLDER}
-                    alt={a.file_name}
+                    alt={getCleanGenerationTitle(a.file_name)}
                     fill
                     sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 20vw"
                     className="object-fill"
@@ -2318,15 +2455,15 @@ return (
                           </div>
                         ) : (
                           <div className="flex items-center gap-1 group/title">
-                            <h3 className="text-xs sm:text-sm font-semibold text-white truncate flex-1" title={a.file_name}>
-                              {a.file_name}
+                            <h3 className="text-xs sm:text-sm font-semibold text-white truncate flex-1" title={getCleanGenerationTitle(a.file_name)}>
+                              {getCleanGenerationTitle(a.file_name)}
                             </h3>
                             <Button
                               size="icon"
                               className="h-8 w-8 sm:h-7 sm:w-7 min-w-[2rem] sm:min-w-[1.75rem] border border-cyber-cyan/30 bg-cyber-dark/60 hover:bg-white/5 opacity-0 group-hover/title:opacity-100 sm:opacity-0 sm:group-hover/title:opacity-100 transition-opacity flex-shrink-0 touch-manipulation"
                               onClick={() => {
                                 setRenameId(a.id)
-                                setDraftTitle(a.file_name)
+                                setDraftTitle(getCleanGenerationTitle(a.file_name))
                               }}
                               title="Rename"
                             >
@@ -2342,6 +2479,7 @@ return (
                             </Badge>
                           )}
                         </div>
+                        
                       </div>
 
                       <div className="mt-2 sm:mt-3 space-y-2">
@@ -2453,11 +2591,11 @@ return (
                       setLightboxOpen(true)
                     }}
                     className="block relative aspect-[5/7] bg-gradient-to-br from-cyber-dark/40 to-cyber-dark/80 rounded-lg overflow-hidden cursor-pointer group w-full border-2 border-cyber-cyan/50 transition-all duration-300 hover:border-cyber-cyan touch-manipulation"
-                    title={p.asset.title}
+                    title={getCleanPurchaseTitle(p.asset.title, p.asset.assetType)}
                   >
                     <Image
                       src={p.asset.imageUrl || PLACEHOLDER}
-                      alt={p.asset.title}
+                      alt={getCleanPurchaseTitle(p.asset.title, p.asset.assetType)}
                       fill
                       sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 20vw"
                       className="object-fill"
@@ -2471,8 +2609,8 @@ return (
                   </button>
 
                   <div className="mt-2 sm:mt-3">
-                    <h3 className="text-xs sm:text-sm font-semibold text-white truncate" title={p.asset.title}>
-                      {p.asset.title}
+                    <h3 className="text-xs sm:text-sm font-semibold text-white truncate" title={getCleanPurchaseTitle(p.asset.title, p.asset.assetType)}>
+                      {getCleanPurchaseTitle(p.asset.title, p.asset.assetType)}
                     </h3>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-xs text-gray-400">
@@ -2578,6 +2716,9 @@ return (
                           {transaction.credits && (
                             <div className="text-xs sm:text-sm font-semibold text-cyber-cyan">
                               {transaction.credits} credits
+                              <div className="text-xs text-gray-400">
+                                ${getDollarValue(Math.abs(transaction.credits)).toFixed(2)}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -2586,6 +2727,43 @@ return (
                   </Card>
                 ))}
               </div>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="feedback" className="space-y-8 sm:space-y-14">
+          {/* Feedback Section */}
+          <section className="mb-8 sm:mb-14">
+            <div className="flex items-end justify-between mb-3 sm:mb-4">
+              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wider">Send Feedback</h2>
+            </div>
+
+            {!uid ? (
+              <Card className="bg-cyber-dark/60 border border-cyber-cyan/30">
+                <CardContent className="p-6 text-gray-400">Sign in to send feedback.</CardContent>
+              </Card>
+            ) : (
+              <Card className="bg-cyber-dark/60 border border-cyber-cyan/30">
+                <CardContent className="p-6">
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <MessageSquare className="w-12 h-12 text-cyber-cyan mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-white mb-2">We'd love to hear from you!</h3>
+                      <p className="text-gray-400 text-sm">
+                        Share your thoughts, report bugs, or suggest new features. Your feedback helps us improve Cardify.
+                      </p>
+                    </div>
+                    
+                    <Button
+                      onClick={() => setFeedbackOpen(true)}
+                      className="w-full cyber-button"
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      Send Feedback
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </section>
         </TabsContent>
@@ -2626,9 +2804,7 @@ return (
             <span className="text-xs text-gray-400 block mb-1">Item Name</span>
             <span className="text-white font-semibold">
               {selectedAsset?.file_name ? 
-                selectedAsset.file_name.length > 50 ? 
-                  selectedAsset.file_name.substring(0, 50) + '...' : 
-                  selectedAsset.file_name
+                getCleanGenerationTitle(selectedAsset.file_name)
                 : 'Custom Trading Card'
               }
             </span>
@@ -2662,7 +2838,7 @@ return (
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-sm text-gray-300">
-            This will remove <span className="text-white font-semibold">{targetAsset?.file_name}</span> from your profile.
+            This will remove <span className="text-white font-semibold">{targetAsset?.file_name ? getCleanGenerationTitle(targetAsset.file_name) : 'this card'}</span> from your profile.
           </p>
           <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
             This action cannot be undone.
@@ -2687,12 +2863,85 @@ return (
       </DialogContent>
     </Dialog>
 
+    {/* Feedback Modal */}
+    <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
+      <DialogContent className="bg-cyber-dark/95 border-2 border-cyber-cyan/50 text-white max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-bold text-white flex items-center gap-2">
+            <MessageSquare className="w-5 h-5 text-cyber-cyan" />
+            Send Feedback
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="text-sm text-gray-300">
+            We'd love to hear your thoughts! Share feedback, report bugs, or suggest new features.
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-300">
+              Subject *
+            </label>
+            <Input
+              value={feedbackSubject}
+              onChange={(e) => setFeedbackSubject(e.target.value)}
+              placeholder="Brief description of your feedback"
+              className="bg-cyber-dark/60 border-cyber-cyan/30 text-white placeholder-gray-400 focus:border-cyber-cyan"
+              maxLength={100}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-300">
+              Message *
+            </label>
+            <Textarea
+              value={feedbackMessage}
+              onChange={(e) => setFeedbackMessage(e.target.value)}
+              placeholder="Please provide details about your feedback, bug report, or feature request..."
+              className="bg-cyber-dark/60 border-cyber-cyan/30 text-white placeholder-gray-400 focus:border-cyber-cyan min-h-[120px] resize-none"
+              maxLength={1000}
+            />
+            <div className="text-xs text-gray-400 text-right">
+              {feedbackMessage.length}/1000 characters
+            </div>
+          </div>
+        </div>
+        <DialogFooter className="pt-2 gap-2 sm:gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setFeedbackOpen(false)
+              setFeedbackSubject("")
+              setFeedbackMessage("")
+            }}
+            className="bg-transparent border-2 border-cyber-pink/50 text-cyber-pink hover:bg-cyber-pink/10 hover:border-cyber-pink hover:text-cyber-pink transition-all"
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={submitFeedback} 
+            disabled={submittingFeedback || !feedbackSubject.trim() || !feedbackMessage.trim()}
+            className="cyber-button"
+          >
+            {submittingFeedback ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              "Send Feedback"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     {/* Lightbox – Uploads */}
     <Lightbox
       images={uploads.map((u) => ({
         id: u.id,
         url: u.public_url,
-        title: u.file_name,
+        title: getCleanGenerationTitle(u.file_name),
         size: u.file_size,
         mimeType: u.mime_type,
       }))}
@@ -2706,7 +2955,7 @@ return (
       images={assets.map((a) => ({
         id: a.id,
         url: a.public_url,
-        title: a.file_name,
+        title: getCleanGenerationTitle(a.file_name),
         size: a.file_size,
         mimeType: a.mime_type,
       }))}

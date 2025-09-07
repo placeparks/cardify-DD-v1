@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import CardPreviewWithCase from "./CardPreviewWithCaseLazy"
-import { ShippingAddressForm, type ShippingAddress } from "./shipping-address-form"
+import { StripeStyledShippingForm, type ShippingAddress } from "./stripe-styled-shipping-form"
 import { Minus, Plus, ShoppingCart, Star, Zap, Shield, AlertCircle, Loader2, Eye, EyeOff, X, ShoppingBag } from "lucide-react"
 import { csrfFetch } from "@/lib/csrf-client"
 import { useCart } from "@/lib/cart-context"
@@ -196,10 +197,13 @@ function LimitedEditionCardPreview() {
           }>
             <div className="relative w-full h-full rounded-xl border-2 border-cyber-cyan/50 shadow-2xl overflow-hidden">
               {/* User's provided image as the card front */}
-              <img
-                src="/Panther_v7_Pinkhair_FLAT.jpg"
+              <Image
+                src="/Panther_v7_Pinkhair_FLAT.webp"
                 alt="Limited Edition Card"
-                className="w-full h-full object-cover rounded-xl image-high-quality"
+                fill
+                priority
+                quality={90}
+                className="object-cover rounded-xl image-high-quality"
                 style={{
                   willChange: 'transform',
                   transform: 'translateZ(0)',
@@ -325,10 +329,12 @@ function LimitedEditionCardPreview() {
           }>
             <div className="relative w-full h-full rounded-xl border-2 border-cyber-pink/50 shadow-2xl cyber-card-glow-gradient overflow-hidden">
               {/* Static image for the back of the card */}
-              <img
+              <Image
                 src="/redbackbleed111111.jpg"
                 alt="Limited Edition Card Back"
-                className="absolute inset-0 w-full h-full object-cover rounded-xl"
+                fill
+                quality={85}
+                className="object-cover rounded-xl"
               />
               
               {/* Limited Edition overlay */}
@@ -1214,6 +1220,37 @@ export function LimitedEditionModal({ isOpen, onClose }: LimitedEditionModalProp
   // Don't render if modal is not visible
   if (!isVisible) return null
 
+  // Render shipping modal separately with clean white design
+  if (currentStep === 'shipping') {
+    return (
+      <div className="fixed inset-0 z-[100] stripe-styled-form-wrapper">
+        <div 
+          className="absolute inset-0 bg-black/50"
+          onClick={onClose}
+        />
+        <div className="relative h-full flex items-start sm:items-center justify-center overflow-y-auto">
+          <div className="w-full max-w-2xl px-4 py-4 sm:py-8 my-auto">
+            <div className="relative bg-white rounded-lg shadow-xl">
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-500 hover:text-gray-700" />
+              </button>
+              <StripeStyledShippingForm
+                onSubmit={handleShippingSubmit}
+                onBack={handleBackToQuantity}
+                isSubmitting={isOrdering}
+                subtotal={currentPricing.totalPrice}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Render loading state
   if (inventoryState.loading && !inventoryState.data) {
     return (
@@ -1701,16 +1738,7 @@ export function LimitedEditionModal({ isOpen, onClose }: LimitedEditionModalProp
                     </div>
                   </div>
                   </div>
-                ) : (
-                  /* Shipping Step */
-                  <div className="max-w-md mx-auto py-6 sm:py-8">
-                    <ShippingAddressForm
-                      onSubmit={handleShippingSubmit}
-                      onBack={handleBackToQuantity}
-                      isSubmitting={isOrdering}
-                    />
-                  </div>
-                )}
+                ) : null}
               </div>
 
               {/* Branding Section - Mobile-only reduced spacing */}

@@ -1,0 +1,36 @@
+// Auto-generated file - DO NOT EDIT MANUALLY
+// Run 'npm run generate-cards' to update
+// Cards are displayed in randomized order
+
+export const availableCards = [
+    '/cards/Mystic_Lion_1.webp',
+    '/cards/Cyber_Phoenix_1.webp',
+    '/cards/gfdss.webp',
+    '/cards/1757039818533-416b6354.webp',
+    '/cards/1757027768128-86909ae7.webp',
+    '/cards/1757034406770-5f86a25f.webp',
+    '/cards/Ancient_Titan.webp',
+    '/cards/fire-unicorn.webp',
+    '/cards/Storm_Knight.webp',
+    '/cards/hackerchu.webp',
+    '/cards/Shadow_Wolf_1.webp',
+    '/cards/1757038742690-484cc02f.webp',
+    '/cards/1757037064439-ae83b65a.webp',
+    '/cards/mergirl.webp',
+    '/cards/cardify-card-1757211407658.webp',
+    '/cards/dash.webp',
+    '/cards/1757038315707-ec416f89.webp',
+    '/cards/cardify-card-1757201481209.webp',
+    '/cards/Cyber_Titan.webp',
+    '/cards/Mystic_Wizard.webp',
+    '/cards/Mystic Dragon.webp',
+    '/cards/Cyber Samurai.webp',
+    '/cards/example-card_cardify.webp',
+    '/cards/snowprincess.webp',
+    '/cards/Shadow_Titan.webp',
+    '/cards/Mystic Panther.webp',
+    '/cards/Wild_Dragon_2.webp',
+    '/cards/Xoe_2.0-1.webp',
+    '/cards/Panther_v7_Pinkhair_FLAT.webp',
+    '/cards/Storm_Phoenix.webp',
+  ];

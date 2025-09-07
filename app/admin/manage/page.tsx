@@ -20,11 +20,25 @@ function AdminManageContent() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [adminCheckLoading, setAdminCheckLoading] = useState(true)
   const [authorizedEmails, setAuthorizedEmails] = useState<string[]>([])
+  const [adminUsers, setAdminUsers] = useState<any[]>([])
   const { toast } = useToast()
 
   useEffect(() => {
     checkAdminStatus()
   }, [])
+
+  const fetchAdminUsers = async () => {
+    try {
+      const response = await fetch('/api/admin/manage')
+      const data = await response.json()
+      
+      if (response.ok && data.adminUsers) {
+        setAdminUsers(data.adminUsers)
+      }
+    } catch (error) {
+      console.error('Error fetching admin users:', error)
+    }
+  }
 
   async function checkAdminStatus() {
     try {
@@ -45,13 +59,28 @@ function AdminManageContent() {
         .eq("user_id", user.id)
         .single()
       
+      // Check if there are any admins at all - if not, allow first admin to access
+      const { data: allAdmins } = await supabase
+        .from("admins")
+        .select("user_id")
+        .limit(1)
+      
       if (adminError || !adminProfile) {
-        console.log('User is not admin, cannot access admin management')
-        setIsAdmin(false)
+        if (!allAdmins || allAdmins.length === 0) {
+          // No admins exist yet, allow first admin setup
+          console.log('No admins exist yet, allowing first admin setup')
+          setIsAdmin(true)
+          setAuthorizedEmails([])
+        } else {
+          console.log('User is not admin, cannot access admin management')
+          setIsAdmin(false)
+        }
       } else {
         setIsAdmin(true)
         // Get the list of authorized admin emails
         getAuthorizedEmails().then(setAuthorizedEmails)
+        // Fetch admin users from database
+        fetchAdminUsers()
       }
     } catch (error) {
       console.error('Error checking admin status:', error)
@@ -90,8 +119,8 @@ function AdminManageContent() {
           variant: "default"
         })
         setEmail('')
-        // Refresh the list
-        setAuthorizedEmails(getAuthorizedEmails())
+        // Refresh the list by fetching from API
+        fetchAdminUsers()
       } else {
         toast({
           title: "Error",
@@ -217,13 +246,16 @@ function AdminManageContent() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {authorizedEmails.map((adminEmail, index) => (
+              {adminUsers.map((admin, index) => (
                 <div key={index} className="flex items-center justify-between p-3 bg-cyber-dark/40 rounded-lg">
                   <div className="flex items-center gap-3">
                     <Shield className="h-5 w-5 text-cyber-cyan" />
                     <div>
-                      <p className="font-medium text-white">{adminEmail}</p>
+                      <p className="font-medium text-white">{admin.email}</p>
                       <p className="text-sm text-gray-400">Authorized Admin</p>
+                      <p className="text-xs text-gray-500">
+                        Added: {new Date(admin.created_at).toLocaleDateString()}
+                      </p>
                     </div>
                   </div>
                   <Badge className="bg-green-500 text-black font-semibold">
@@ -233,7 +265,7 @@ function AdminManageContent() {
                 </div>
               ))}
               
-              {authorizedEmails.length === 0 && (
+              {adminUsers.length === 0 && (
                 <div className="text-center py-8 text-gray-400">
                   <Shield className="h-12 w-12 mx-auto mb-4 text-gray-600" />
                   <p>No authorized admin users found</p>

@@ -81,9 +81,59 @@ export async function POST(req: NextRequest) {
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
     const { data: { user } } = await supabase.auth.getUser()
     
-    // Parse request body
-    const body = await req.json()
-    const { prompt, referenceImage, referenceImagePath, referenceImageUrl, maintainLikeness = true, devReset } = body
+    // Parse request - handle both JSON and FormData
+    let prompt: string | null = null
+    let referenceImage: string | null = null
+    let referenceImageFile: File | null = null
+    let maintainLikeness = true
+    let devReset = false
+    
+    const contentType = req.headers.get('content-type')
+    
+    if (contentType?.includes('multipart/form-data')) {
+      // Handle FormData (new minimal memory approach)
+      const formData = await req.formData()
+      prompt = formData.get('prompt') as string
+      maintainLikeness = formData.get('maintainLikeness') === 'true'
+      
+      const file = formData.get('referenceImage') as File
+      if (file && file.size > 0) {
+        // Validate file type for GPT-4 Vision compatibility
+        const acceptedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
+        if (!acceptedTypes.includes(file.type.toLowerCase())) {
+          return NextResponse.json(
+            { 
+              error: 'Invalid image format. Only PNG, JPEG, GIF, and WEBP files are accepted.',
+              code: 'INVALID_IMAGE_FORMAT'
+            },
+            { status: 400 }
+          )
+        }
+        
+        // Additional validation by file extension
+        const acceptedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+        const fileName = file.name.toLowerCase()
+        const hasValidExtension = acceptedExtensions.some(ext => fileName.endsWith(ext))
+        if (!hasValidExtension) {
+          return NextResponse.json(
+            { 
+              error: 'Invalid file extension. Only PNG, JPEG, GIF, and WEBP files are accepted.',
+              code: 'INVALID_FILE_EXTENSION'
+            },
+            { status: 400 }
+          )
+        }
+        
+        referenceImageFile = file
+      }
+    } else {
+      // Handle JSON (backward compatibility)
+      const body = await req.json()
+      prompt = body.prompt
+      referenceImage = body.referenceImage
+      maintainLikeness = body.maintainLikeness ?? true
+      devReset = body.devReset ?? false
+    }
     
     if (!prompt || typeof prompt !== 'string') {
       return NextResponse.json(
@@ -132,8 +182,8 @@ export async function POST(req: NextRequest) {
         console.log(`Retrying with ${quality} quality after timeout...`)
       }
       
-      // Handle both old base64 format (backward compatibility) and new URL format
-      const hasReferenceImage = referenceImage || referenceImageUrl
+      // Handle reference image from various sources
+      const hasReferenceImage = referenceImage || referenceImageFile
       
       if (hasReferenceImage) {
         // If reference image is provided, use the edit endpoint
@@ -150,24 +200,10 @@ export async function POST(req: NextRequest) {
         // Convert image to File object for OpenAI API
         let imageFile: File;
         
-        if (referenceImageUrl && !referenceImage) {
-          // New flow: Fetch image from Supabase URL
-          console.log('Fetching reference image from URL:', referenceImageUrl)
-          
-          try {
-            const imageResponse = await fetch(referenceImageUrl)
-            if (!imageResponse.ok) {
-              throw new Error(`Failed to fetch image: ${imageResponse.statusText}`)
-            }
-            
-            const imageBlob = await imageResponse.blob()
-            imageFile = new File([imageBlob], 'reference.jpg', { type: imageBlob.type || 'image/jpeg' })
-            
-            console.log('Successfully fetched reference image, size:', imageFile.size)
-          } catch (fetchError) {
-            console.error('Failed to fetch reference image from URL:', fetchError)
-            throw new Error('Failed to retrieve reference image from storage')
-          }
+        if (referenceImageFile) {
+          // New minimal memory approach: Use the File directly from FormData
+          console.log('Using direct file upload, size:', referenceImageFile.size)
+          imageFile = referenceImageFile
         } else if (referenceImage) {
           // Old flow: Handle base64 image (backward compatibility)
           console.log('Using base64 reference image (legacy mode)')
@@ -201,7 +237,7 @@ export async function POST(req: NextRequest) {
           size: "1024x1536", // Portrait format for trading cards
           quality: quality,
           // @ts-expect-error - input_fidelity is a new parameter not yet in TypeScript types
-          input_fidelity: maintainLikeness && quality === "high" ? "high" : "medium", // Adjust fidelity with quality
+          input_fidelity: maintainLikeness && quality === "high" ? "high" : "low", // Use low fidelity when not maintaining likeness or lower quality
         })
       } else {
         // Normal text-to-image generation
@@ -238,23 +274,7 @@ export async function POST(req: NextRequest) {
         ? imageUrl 
         : `data:image/png;base64,${imageUrl}`
       
-      // Clean up temp reference image if path was provided
-      if (referenceImagePath) {
-        // Delete from Supabase storage directly
-        try {
-          const { error } = await supabase.storage
-            .from('temp-references')
-            .remove([referenceImagePath])
-          
-          if (error) {
-            console.warn('Failed to cleanup temp reference image:', error)
-          } else {
-            console.log('Cleaned up temp reference image:', referenceImagePath)
-          }
-        } catch (cleanupError) {
-          console.warn('Cleanup error:', cleanupError)
-        }
-      }
+      // No cleanup needed with direct file upload approach
       
       return NextResponse.json({
         success: true,
@@ -297,22 +317,7 @@ export async function POST(req: NextRequest) {
             ? imageUrl 
             : `data:image/png;base64,${imageUrl}`
           
-          // Clean up temp reference image if path was provided (on retry success)
-          if (referenceImagePath) {
-            try {
-              const { error } = await supabase.storage
-                .from('temp-references')
-                .remove([referenceImagePath])
-              
-              if (error) {
-                console.warn('Failed to cleanup temp reference image:', error)
-              } else {
-                console.log('Cleaned up temp reference image:', referenceImagePath)
-              }
-            } catch (cleanupError) {
-              console.warn('Cleanup error:', cleanupError)
-            }
-          }
+          // No cleanup needed with direct file upload approach
           
           return NextResponse.json({
             success: true,
@@ -386,18 +391,15 @@ export async function POST(req: NextRequest) {
       
       if (error?.error?.code === 'content_policy_violation' || 
           error?.error?.code === 'moderation_blocked') {
-        const isReferenceImage = !!(referenceImage || referenceImageUrl)
+        const isReferenceImage = !!(referenceImage || referenceImageFile)
         const errorMessage = isReferenceImage 
-          ? 'Your reference image was blocked by content moderation. Please use a different image that complies with content guidelines.'
-          : 'Your prompt was flagged by content policy. Please try a different prompt.'
+          ? 'Your reference image was blocked by content moderation. Common reasons: nudity/suggestive content, violence, copyrighted characters, celebrities, or images of minors. Try using a different image.'
+          : 'Your prompt was flagged by content policy. Avoid references to real public figures, violence, sexual content, or copyrighted characters.'
         
         return NextResponse.json(
           { 
             error: errorMessage,
-            code: 'CONTENT_POLICY_VIOLATION',
-            details: isReferenceImage 
-              ? 'Avoid: nudity, violence, hateful imagery, or copyrighted characters'
-              : 'Avoid: explicit content, violence, or hateful language'
+            code: 'CONTENT_POLICY_VIOLATION'
           },
           { status: 400 }
         )

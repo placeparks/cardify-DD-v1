@@ -6,7 +6,9 @@ import { Sparkles, Shield, ArrowRight, Globe, Brain, Printer, Upload, Store, Gem
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { LimitedEditionModalWithSuspense } from "@/components/LazyComponents"
-import { useState, useEffect } from "react"
+import { CardGrid3D } from "@/components/card-grid-3d-optimized"
+import { CardGrid3DMobileOptimized } from "@/components/card-grid-3d-mobile-optimized"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { signInWithGoogle } from "@/lib/supabase-browser"
 import { useRouter } from "next/navigation"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
@@ -15,9 +17,16 @@ import { useToast } from "@/hooks/use-toast"
 
 export default function HomePage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
- const router   = useRouter()
+  const [spotlightPos, setSpotlightPos] = useState({ x: 50, y: 50 })
+  const [isMobile, setIsMobile] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [scrollProgress, setScrollProgress] = useState(0)
+  const [cardsLoaded, setCardsLoaded] = useState(false)
+  const router = useRouter()
   const supabase = createClientComponentClient()
-  const { toast } = useToast()       
+  const { toast } = useToast()
+  const throttleRef = useRef<NodeJS.Timeout | null>(null)
+  const scrollThrottleRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleModalClose = () => {
     setIsModalOpen(false)
@@ -52,7 +61,52 @@ export default function HomePage() {
     router.push("/upload")
   }
 
+  const handleMouseMove = useCallback((e: MouseEvent<HTMLElement>) => {
+    // Throttle the mouse move events to prevent infinite loop
+    if (throttleRef.current) return
+    
+    throttleRef.current = setTimeout(() => {
+      throttleRef.current = null
+    }, 16) // ~60fps
+    
+    // Get the text container element
+    const textContainer = e.currentTarget.querySelector('.hero-text-container') as HTMLElement
+    if (!textContainer) return
+    
+    const rect = textContainer.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    setSpotlightPos({ x, y })
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    // Throttle scroll events
+    if (scrollThrottleRef.current) return
+    
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null
+    }, 16) // ~60fps
+    
+    // Calculate scroll progress (0 to 1)
+    const scrollY = window.scrollY
+    const heroHeight = window.innerHeight
+    const progress = Math.min(Math.max(scrollY / heroHeight, 0), 1)
+    setScrollProgress(progress)
+  }, [])
+
   useEffect(() => {
+    // Set mobile state and mounted state immediately
+    setIsMobile(window.innerWidth < 768)
+    setMounted(true)
+    
+    // Check if mobile device - only based on screen size, not touch capability
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    
+    window.addEventListener('resize', checkMobile)
+    window.addEventListener('scroll', handleScroll)
+    
     // Check URL params on mount
     const params = new URLSearchParams(window.location.search)
     if (params.get('openLimitedEdition') === 'true') {
@@ -69,47 +123,71 @@ export default function HomePage() {
     window.addEventListener('openLimitedEditionModal', handleCustomEvent)
     
     return () => {
+      window.removeEventListener('resize', checkMobile)
+      window.removeEventListener('scroll', handleScroll)
       window.removeEventListener('openLimitedEditionModal', handleCustomEvent)
+      // Cleanup throttle timeouts
+      if (throttleRef.current) {
+        clearTimeout(throttleRef.current)
+      }
+      if (scrollThrottleRef.current) {
+        clearTimeout(scrollThrottleRef.current)
+      }
     }
-  }, [])
+  }, [handleScroll])
 
   return (
-    <div className="min-h-screen bg-cyber-black relative overflow-hidden font-mono">
+    <div className="min-h-screen bg-cyber-black relative overflow-x-hidden font-mono">
       <Navigation />
 
       {/* Limited Edition Modal */}
       <LimitedEditionModalWithSuspense isOpen={isModalOpen} onClose={handleModalClose} />
 
-      {/* Animated Grid Background */}
-      <div className="absolute inset-0 cyber-grid opacity-20" />
+      {/* Animated Grid Background - Hidden when 3D cards are shown */}
+      {/* <div className="absolute inset-0 cyber-grid opacity-20" /> */}
 
-      {/* Scanlines Effect */}
-      <div className="absolute inset-0 scanlines opacity-30" />
+      {/* Scanlines Effect - Hidden when 3D cards are shown */}
+      {/* <div className="absolute inset-0 scanlines opacity-30" /> */}
 
       {/* Hero Section */}
-      <section className="relative px-6 py-20 pt-24 md:pt-40 overflow-hidden fade-in">
-        {/* Enhanced Glowing orbs with staggered animations - Reduced for performance */}
-        <div className="absolute top-20 left-10 w-64 h-64 bg-cyber-cyan rounded-full blur-3xl animate-glow-cyan" style={{ animationDelay: '0.3s' }} />
-        <div className="absolute top-40 right-20 w-48 h-48 bg-cyber-pink rounded-full blur-3xl animate-glow-pink" style={{ animationDelay: '0.5s' }} />
-        <div className="absolute bottom-20 left-1/3 w-80 h-80 bg-cyber-purple rounded-full blur-3xl animate-glow-purple" style={{ animationDelay: '0.7s' }} />
-        <div className="absolute top-1/2 right-1/4 w-56 h-56 bg-cyber-green rounded-full blur-3xl animate-glow-green" style={{ animationDelay: '0.9s' }} />
+      <section className="relative px-6 py-20 pt-24 md:pt-40 fade-in" onMouseMove={!isMobile ? handleMouseMove : undefined}>
+        {/* 3D Card Grid Background - Only render after mount to prevent hydration mismatch */}
+        {mounted && (isMobile ? 
+          <CardGrid3DMobileOptimized asBackground scrollProgress={scrollProgress} /> : 
+          <CardGrid3D asBackground scrollProgress={scrollProgress} onImagesLoaded={() => {
+            // Wait for fade-in animation to complete (1.5s) before enabling mask
+            setTimeout(() => setCardsLoaded(true), 1500)
+          }} />
+        )}
 
-        <div className="relative max-w-6xl mx-auto text-center">
-          <h1 className="text-6xl md:text-8xl font-bold mb-6 leading-tight tracking-wider">
-            <span className="text-white">Create Epic</span>
-            <br />
-            <span className="holographic glitch" data-text="Trading Cards">
-              Trading Cards
-            </span>
-          </h1>
+        <div className="relative max-w-6xl mx-auto text-center pointer-events-none hero-text-container" style={{ zIndex: 10 }}>
+          <div
+            style={mounted && !isMobile && cardsLoaded ? { 
+              WebkitMaskImage: `radial-gradient(circle 400px at ${spotlightPos.x}px ${spotlightPos.y}px, transparent 0%, transparent 25%, black 100%)`,
+              maskImage: `radial-gradient(circle 400px at ${spotlightPos.x}px ${spotlightPos.y}px, transparent 0%, transparent 25%, black 100%)`,
+              WebkitMaskSize: '100% 100%',
+              maskSize: '100% 100%',
+              WebkitMaskRepeat: 'no-repeat',
+              maskRepeat: 'no-repeat',
+              transition: 'mask-position 0.1s ease-out, -webkit-mask-position 0.1s ease-out'
+            } : {}}
+          >
+            <h1 className="text-6xl md:text-8xl font-bold mb-6 leading-tight tracking-wider">
+              <span className="text-white">Create Epic</span>
+              <br />
+              <span className="holographic glitch" data-text="Trading Cards">
+                Trading Cards
+              </span>
+            </h1>
 
-          <p className="text-xl text-gray-300 mb-12 max-w-3xl mx-auto leading-relaxed">
-            Professional trading card designs made simple. <span className="neon-green">Create with AI, upload your art, 
-            sell to collectors, or print what you love.</span>
-          </p>
+            <p className="text-xl text-gray-300 mb-12 max-w-3xl mx-auto leading-relaxed">
+              Professional trading card designs made simple. <span className="neon-green">Create with AI, upload your art, 
+              sell to collectors, or print what you love.</span>
+            </p>
+          </div>
 
           <div className="flex flex-col gap-6 justify-center items-center">
-            <Link href="/generate">
+            <Link href="/generate" className="pointer-events-auto relative z-10">
               <Button size="lg" className="cyber-button px-10 py-6 text-lg font-bold tracking-wider">
                 <Sparkles className="w-5 h-5 mr-3" />
                 Generate Card
@@ -121,9 +199,9 @@ export default function HomePage() {
              <Button
       onClick={handleUploadClick}
       size="lg"
-      className="bg-cyber-dark/80 border-2 border-cyber-pink text-cyber-pink
-                 hover:bg-cyber-pink/10 hover:shadow-lg hover:shadow-cyber-pink/20
-                 px-10 py-6 text-lg font-bold tracking-wider transition-all duration-300"
+      className="bg-black/90 border-2 border-cyber-pink text-cyber-pink
+                 hover:bg-gray-900 hover:shadow-lg hover:shadow-cyber-pink/20
+                 px-10 py-6 text-lg font-bold tracking-wider transition-all duration-300 pointer-events-auto relative z-10"
     >
                   <Upload className="w-5 h-5 mr-3" />
                   Upload Design
@@ -138,7 +216,7 @@ export default function HomePage() {
             <div className="text-center">
               <button
                 onClick={handleOpenModal}
-                className="inline-flex items-center gap-2 text-sm text-cyber-purple hover:text-cyber-pink transition-colors duration-300 group"
+                className="inline-flex items-center gap-2 text-sm text-cyber-purple hover:text-cyber-pink transition-colors duration-300 group pointer-events-auto relative z-10"
               >
                 <Gem className="w-4 h-4 group-hover:animate-pulse" />
                 <span className="underline underline-offset-4 decoration-dotted">Limited Edition KOL Card</span>
@@ -182,7 +260,7 @@ export default function HomePage() {
                 </div>
                 <h3 className="text-xl font-bold text-cyber-pink mb-4 tracking-wider">Sell Your Designs</h3>
                 <p className="text-gray-300 leading-relaxed text-sm">
-                  List your card artwork on our marketplace and earn from every sale. Set your own prices, reach collectors worldwide, 
+                  List your card artwork on our marketplace and earn from every sale. Share your unique creations, reach collectors worldwide, 
                   and build your reputation as a card creator.
                 </p>
               </CardContent>
@@ -249,15 +327,15 @@ export default function HomePage() {
         <div className="max-w-4xl mx-auto text-center relative">
           <Card className="bg-cyber-dark/80 backdrop-blur-sm border border-cyber-cyan/50 neon-glow-cyan">
             <CardContent className="p-8 sm:p-12">
-              <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4 tracking-wider">
+              <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4 tracking-wider pointer-events-none">
                 <span className="holographic">Ready to Create?</span>
               </h2>
-              <p className="text-lg sm:text-xl text-gray-300 mb-8 max-w-md mx-auto">
+              <p className="text-lg sm:text-xl text-gray-300 mb-8 max-w-md mx-auto pointer-events-none">
                 From idea to printed card in minutes.{" "}
                 <span className="neon-green">AI-powered or bring your own designs.</span>
               </p>
               <div className="flex flex-col gap-4 justify-center max-w-2xl mx-auto">
-                <Link href="/generate" className="w-full">
+                <Link href="/generate" className="w-full pointer-events-auto">
                   <Button
                     size="lg"
                     className="cyber-button w-full px-8 sm:px-12 py-4 sm:py-6 text-lg sm:text-xl font-bold tracking-wider"
@@ -270,10 +348,10 @@ export default function HomePage() {
              <Button
       onClick={handleUploadClick}
       size="lg"
-      className="bg-cyber-dark/80 border-2 border-cyber-pink text-cyber-pink
-                 hover:bg-cyber-pink/10 hover:shadow-lg hover:shadow-cyber-pink/20
+      className="bg-black/90 border-2 border-cyber-pink text-cyber-pink
+                 hover:bg-gray-900 hover:shadow-lg hover:shadow-cyber-pink/20
                  w-full px-8 sm:px-12 py-4 sm:py-6 text-lg sm:text-xl
-                 font-bold tracking-wider transition-all duration-300"
+                 font-bold tracking-wider transition-all duration-300 pointer-events-auto"
     >
                     <Upload className="w-5 h-5 sm:w-6 sm:h-6 mr-3" />
                     Upload

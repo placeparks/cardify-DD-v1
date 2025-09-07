@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,10 +24,10 @@ const CustomCard3DPreviewWrapper = dynamic(() => import("./CustomCard3DPreviewWr
     </div>
   ),
 })
-import { ShippingAddressForm, type ShippingAddress } from "./shipping-address-form"
+import { StripeStyledShippingForm, type ShippingAddress } from "./stripe-styled-shipping-form"
 import { Minus, Plus, ShoppingCart, Star, Zap, Shield, AlertCircle, Loader2, Eye, EyeOff, X, ShoppingBag } from "lucide-react"
 import { csrfFetch } from "@/lib/csrf-client"
-import { uploadUserImage } from "@/lib/supabase-storage";
+import { uploadToSupabase } from "@/lib/supabase-storage"
 import { useCart } from "@/lib/cart-context"
 
 interface CustomCardCheckoutModalProps {
@@ -399,10 +400,12 @@ function CustomCardPreview({ uploadedImage, cardFinish }: { uploadedImage: strin
           }>
             <div className="relative w-full h-full rounded-xl border-2 border-cyber-pink/50 shadow-2xl cyber-card-glow-gradient overflow-hidden">
               {/* Static image for the back of the card */}
-              <img
+              <Image
                 src="/redbackbleed111111.jpg"
                 alt="Card Back"
-                className="absolute inset-0 w-full h-full object-cover rounded-xl"
+                fill
+                quality={85}
+                className="object-cover rounded-xl"
               />
               
               {/* Custom overlay */}
@@ -1088,47 +1091,166 @@ export function CustomCardCheckoutModal({ isOpen, onClose, uploadedImage, proces
         
         // Upload directly to Supabase Storage
         try {
-          const uploadData = await uploadUserImage(
-            imageBlob,
-            undefined,
-            {
-              original_filename: "custom-card.png",
-              upload_source: "custom_card_order",
-              card_finish: cardFinish,
-              quantity: quantityState.value,
-            }
-          );
+          const uploadData = await uploadToSupabase(imageBlob)
           customImageUrl = uploadData.publicUrl
           console.log('✅ Direct upload successful:', customImageUrl)
-        } catch (uploadError: any) {
-          console.error('❌ Direct upload failed:', uploadError);
-          throw new Error(`Failed to upload image: ${uploadError.message || 'Unknown error'}`);
+        } catch (uploadError) {
+          console.error('❌ Direct upload failed:', uploadError)
+          throw new Error(`Failed to upload image: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`)
         }
       } else {
         console.log('✅ Using pre-uploaded image:', customImageUrl)
       }
 
+      // Proceed with checkout session creation
+      console.log('💳 Creating Stripe checkout session for custom card...', {
+        quantity: quantityState.value,
+        endpoint: '/api/create-checkout-session',
+        payload: {
+          quantity: quantityState.value,
+          includeDisplayCase,
+          displayCaseQuantity,
+          shippingAddress: address,
+          isCustomCard: true,
+          customImageUrl: customImageUrl,
+          cardFinish: cardFinish
+        }
+      })
+      
+      const response = await csrfFetch('/api/create-checkout-session', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          quantity: quantityState.value,
+          includeDisplayCase,
+          displayCaseQuantity,
+          shippingAddress: address,
+          isCustomCard: true,
+          customImageUrl: customImageUrl,
+          cardFinish: cardFinish
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        
+        console.error('❌ Checkout session creation failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorCode: errorData.code,
+          errorMessage: errorData.error,
+          errorDetails: errorData.details || null,
+          availableInventory: errorData.availableInventory || null
+        })
+        
+        // Enhanced error handling based on specific error codes
+        let userMessage = 'An unexpected error occurred. Please try again.'
+        
+        switch (errorData.code) {
+          case 'INSUFFICIENT_INVENTORY':
+            // Update inventory state with server response
+            if (typeof errorData.availableInventory === 'number') {
+              setInventoryState(prev => ({
+                ...prev,
+                data: prev.data ? { ...prev.data, inventory: errorData.availableInventory } : null
+              }))
+              
+              // Adjust quantity if some inventory is still available
+              if (errorData.availableInventory > 0) {
+                const newQuantityState = validateQuantity(errorData.availableInventory)
+                setQuantityState(newQuantityState)
+                saveQuantityToStorage(newQuantityState.value)
+                console.log('🔄 Auto-adjusted quantity due to insufficient inventory:', {
+                  from: quantityState.value,
+                  to: newQuantityState.value,
+                  availableInventory: errorData.availableInventory
+                })
+              }
+            }
+            userMessage = errorData.error || 'Insufficient inventory available'
+            break
+            
+          case 'CSRF_INVALID':
+            userMessage = 'Security validation failed. Please refresh the page and try again.'
+            console.error('🔒 CSRF validation failed - possible security issue or expired session')
+            break
+            
+          case 'INVALID_QUANTITY':
+            userMessage = 'Invalid quantity selected. Please choose a quantity between 1 and 100.'
+            break
+            
+          case 'INVENTORY_CHECK_FAILED':
+            userMessage = 'Unable to verify product availability. Please try again in a moment.'
+            break
+            
+          case 'STRIPE_ERROR':
+            // Enhanced Stripe error handling with specific details
+            console.error('💳 Stripe API error:', {
+              stripeDetails: errorData.details,
+              originalError: errorData.error
+            })
+            
+            // Parse common Stripe error patterns for better user messaging
+            if (errorData.details) {
+              if (errorData.details.includes('rate_limit')) {
+                userMessage = 'Too many requests. Please wait a moment and try again.'
+              } else if (errorData.details.includes('api_key')) {
+                userMessage = 'Payment system configuration error. Please contact support.'
+                console.error('🚨 Stripe API key issue detected')
+              } else if (errorData.details.includes('card')) {
+                userMessage = 'Payment method error. Please check your payment details.'
+              } else {
+                userMessage = 'Payment processing is temporarily unavailable. Please try again later.'
+              }
+            } else {
+              userMessage = 'Payment processing error. Please try again.'
+            }
+            break
+            
+          case 'SESSION_CREATION_FAILED':
+            userMessage = 'Unable to initialize payment. Please try again.'
+            break
+            
+          case 'METHOD_NOT_ALLOWED':
+            userMessage = 'Invalid request method. Please refresh the page and try again.'
+            console.error('🚨 HTTP method not allowed - possible client/server version mismatch')
+            break
+            
+          case 'INVALID_JSON':
+            userMessage = 'Request format error. Please refresh the page and try again.'
+            console.error('🚨 Invalid JSON sent to server - possible client issue')
+            break
+            
+          default:
+            // Use server-provided error message as fallback
+            userMessage = errorData.error || 'An unexpected error occurred. Please try again.'
+            console.error('❓ Unknown error code:', errorData.code)
+        }
+        
+        throw new Error(userMessage)
+      }
+
+      const data = await response.json()
+      
+      console.log('✅ Checkout session created successfully:', {
+        sessionId: data.id,
+        hasUrl: !!data.url,
+        message: data.message
+      })
+      
       // Clear stored quantity since user is proceeding with checkout
       clearQuantityFromStorage()
       console.log('🧹 Cleared stored quantity from localStorage')
       
-      // Close modal and redirect to checkout page
-      onClose?.()
-      
-      // Build checkout URL with custom card parameters
-      const checkoutParams = new URLSearchParams({
-        quantity: quantityState.value.toString(),
-        includeDisplayCase: includeDisplayCase.toString(),
-        displayCaseQuantity: displayCaseQuantity.toString(),
-        customImageUrl: customImageUrl,
-        cardFinish: cardFinish
-      })
-      
-      const checkoutUrl = `/checkout?${checkoutParams.toString()}`
-      console.log('🔄 Redirecting to checkout page:', checkoutUrl)
-      
-      window.location.href = checkoutUrl
-      
+      // Redirect to Stripe Checkout
+      if (data.url) {
+        console.log('🔄 Redirecting to Stripe Checkout...', {
+          url: data.url,
+          sessionId: data.id
+        })
+        window.location.href = data.url
+      } else {
+        throw new Error('No checkout URL received from payment processor')
+      }
     } catch (error) {
       // Enhanced error logging with full context
       const errorDetails = {
@@ -1188,6 +1310,37 @@ export function CustomCardCheckoutModal({ isOpen, onClose, uploadedImage, proces
               <p className="text-gray-400">Syncing to the mainframe</p>
             </CardContent>
           </Card>
+        </div>
+      </div>
+    )
+  }
+
+  // Render shipping modal separately
+  if (currentStep === 'shipping') {
+    return (
+      <div className="fixed inset-0 z-[100] stripe-styled-form-wrapper">
+        <div 
+          className="absolute inset-0 bg-black/50"
+          onClick={onClose}
+        />
+        <div className="relative h-full flex items-start sm:items-center justify-center overflow-y-auto">
+          <div className="w-full max-w-2xl px-4 py-4 sm:py-8 my-auto">
+            <div className="relative bg-white rounded-lg shadow-xl">
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-500 hover:text-gray-700" />
+              </button>
+              <StripeStyledShippingForm
+                onSubmit={handleShippingSubmit}
+                onBack={handleBackToQuantity}
+                isSubmitting={isOrdering}
+                subtotal={currentPricing.totalPrice}
+              />
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -1253,25 +1406,15 @@ export function CustomCardCheckoutModal({ isOpen, onClose, uploadedImage, proces
                   <h1 
                     id="modal-title"
                     className="text-lg sm:text-2xl lg:text-3xl font-bold text-white tracking-wider glitch" 
-                    data-text="Custom Card"
+                    data-text="Print Your Masterpiece"
                   >
-                    Custom Card
+                    Print Your Masterpiece
                   </h1>
                   <Star className="w-4 h-4 sm:w-5 sm:h-5 text-cyber-purple sm:animate-pulse" />
                 </div>
-                <h2 className="text-base sm:text-xl lg:text-2xl font-bold mb-1 bg-[linear-gradient(45deg,#00ffff_0%,#ff0080_25%,#00ff41_50%,#8a2be2_75%,#00ffff_100%)] bg-clip-text text-transparent bg-[length:400%_400%] bg-[position:0%_50%] sm:[animation:holographic-shift_3s_ease-in-out_infinite]">
-                  &quot;Your Custom Design&quot;
+                <h2 className="text-base sm:text-xl lg:text-2xl font-bold mb-1 bg-[linear-gradient(45deg,#00ffff_0%,#ff0080_25%,#00ff41_50%,#8a2be2_75%,#00ffff_100%)] bg-clip-text text-transparent bg-[length:400%_400%] bg-[position:0%_50%] sm:[animation:holographic-shift_3s_ease-in-out_infinite] max-w-md mx-auto text-center">
+                  Premium quality trading cards delivered worldwide
                 </h2>
-                <div className="flex items-center justify-center gap-2 text-cyber-purple">
-                  <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span 
-                    id="modal-description"
-                    className="text-xs sm:text-base font-semibold"
-                  >
-                    Upload Your Own Artwork
-                  </span>
-                  <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
-                </div>
                 
                 {/* Error state indicator */}
                 {inventoryState.error && (
@@ -1658,16 +1801,7 @@ export function CustomCardCheckoutModal({ isOpen, onClose, uploadedImage, proces
                     </div>
                   </div>
                   </div>
-                ) : (
-                  /* Shipping Step */
-                  <div className="max-w-md mx-auto py-6 sm:py-8">
-                    <ShippingAddressForm
-                      onSubmit={handleShippingSubmit}
-                      onBack={handleBackToQuantity}
-                      isSubmitting={isOrdering}
-                    />
-                  </div>
-                )}
+                ) : null}
               </div>
 
               {/* Branding Section - Mobile-only reduced spacing */}
