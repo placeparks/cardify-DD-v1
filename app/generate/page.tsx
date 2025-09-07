@@ -950,7 +950,7 @@ const handleGenerate = async (): Promise<void> => {
               </span>
 
               <div className="flex gap-1">
-                {[1, 2, 3].map((i) => (
+                {[1].map((i) => (
                   <div
                     key={i}
                     className={`w-3 h-3 rounded-full transition-colors
