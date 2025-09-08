@@ -178,19 +178,19 @@ export default function SellerGalleryPage() {
       .from('duplicate_detections')
       .select('asset_id, status')
       .in('asset_id', assetIds)
-      .eq('status', 'pending')
+      .in('status', ['pending', 'rejected']) // Include both pending and rejected items
 
-    // Create a set of asset IDs that are under review
-    const underReviewAssetIds = new Set((duplicateDetections ?? []).map(d => d.asset_id))
+    // Create a set of asset IDs that are under review or rejected
+    const excludedAssetIds = new Set((duplicateDetections ?? []).map(d => d.asset_id))
 
-    // Filter out assets that are under review
-    const filteredAssets = (allAssets ?? []).filter(asset => !underReviewAssetIds.has(asset.id))
+    // Filter out assets that are under review or rejected
+    const filteredAssets = (allAssets ?? []).filter(asset => !excludedAssetIds.has(asset.id))
 
     // Index listings by asset id
     const listingBySource = new Map<string, any>()
     for (const l of listings ?? []) {
-      // Skip listings for assets that are under review
-      if (underReviewAssetIds.has(l.asset_id)) continue
+      // Skip listings for assets that are under review or rejected
+      if (excludedAssetIds.has(l.asset_id)) continue
       
       // Transform the joined data to match our expected structure
       const transformedListing = {
@@ -206,7 +206,7 @@ export default function SellerGalleryPage() {
       listingBySource.set(l.asset_id, transformedListing)
     }
 
-    // 1) Start with filtered assets (public and private, excluding under review)
+    // 1) Start with filtered assets (public and private, excluding under review and rejected)
     const merged = new Map<string, UIItem>()
     for (const a of filteredAssets) {
       const fileName = (a.title && a.title.trim()) || a.storage_path?.split('/').pop() || 'file'
