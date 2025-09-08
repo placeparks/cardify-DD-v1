@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { Loader2 } from "lucide-react";
 import AuthenticatedGeneratePage from "./authenticated";
+import FreeGeneratePage from "../free-generate/page";
 
 export default function GeneratePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     const checkAuthAndRoute = async () => {
@@ -21,22 +20,20 @@ export default function GeneratePage() {
           // User is signed in, show authenticated generate page
           setIsAuthenticated(true);
         } else {
-          // User is not signed in, redirect to free generate page
-          router.replace("/free-generate");
-          return;
+          // User is not signed in, show free generate page
+          setIsAuthenticated(false);
         }
       } catch (error) {
         console.error("Error checking authentication:", error);
-        // On error, redirect to free generate page
-        router.replace("/free-generate");
-        return;
+        // On error, show free generate page
+        setIsAuthenticated(false);
       } finally {
         setIsLoading(false);
       }
     };
 
     checkAuthAndRoute();
-  }, [router]);
+  }, []);
 
   // Show loading state while checking authentication
   if (isLoading) {
@@ -55,6 +52,6 @@ export default function GeneratePage() {
     return <AuthenticatedGeneratePage />;
   }
 
-  // This should not render as we redirect above
-  return null;
+  // If not authenticated, show the free generate page
+  return <FreeGeneratePage />;
 }

@@ -583,7 +583,7 @@ type ProfileRow = {
   free_generations_used: number | null;
 };
 
-const FREE_LIMIT = 3;
+const FREE_LIMIT = 1;
 
 export default function FreeGeneratePage() {
   /* ───────── auth & credits ───────────────── */
@@ -1506,7 +1506,7 @@ const handleGenerate = async (): Promise<void> => {
               </span>
 
               <div className="flex gap-1">
-                {[1, 2, 3].map((i) => (
+                {[1].map((i) => (
                   <div
                     key={i}
                     className={`w-3 h-3 rounded-full transition-colors
