@@ -1323,9 +1323,9 @@ export function CustomCardCheckoutModal({ isOpen, onClose, uploadedImage, proces
           className="absolute inset-0 bg-black/50"
           onClick={onClose}
         />
-        <div className="relative h-full flex items-start sm:items-center justify-center overflow-y-auto">
-          <div className="w-full max-w-2xl px-4 py-4 sm:py-8 my-auto">
-            <div className="relative bg-white rounded-lg shadow-xl">
+        <div className="relative h-full flex items-start sm:items-center justify-center overflow-y-auto p-4">
+          <div className="w-full max-w-2xl py-4 sm:py-8">
+            <div className="relative bg-white rounded-lg shadow-xl max-h-[90vh] overflow-y-auto">
               <button
                 onClick={onClose}
                 className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white shadow-lg hover:shadow-xl transition-shadow"
