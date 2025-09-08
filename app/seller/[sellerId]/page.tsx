@@ -155,14 +155,39 @@ export default function SellerGalleryPage() {
     // ALL listings by this seller (active and inactive)
     const { data: listings } = await supabase
       .from('marketplace_listings') // Updated table name
-      .select('id, asset_id, seller_id, title, image_url, price_cents, status, created_at') // Updated column names
+      .select(`
+        id, 
+        asset_id, 
+        seller_id, 
+        title, 
+        price_cents, 
+        status, 
+        created_at,
+        user_assets!inner(
+          image_url,
+          title
+        )
+      `) // Updated to use JOIN with user_assets
       .eq('seller_id', sellerId)
       .order('created_at', { ascending: false })
-      .returns<ListingRow[]>()
+      .returns<any[]>()
 
     // Index listings by asset id
-    const listingBySource = new Map<string, ListingRow>()
-    for (const l of listings ?? []) listingBySource.set(l.asset_id, l) // Updated column name
+    const listingBySource = new Map<string, any>()
+    for (const l of listings ?? []) {
+      // Transform the joined data to match our expected structure
+      const transformedListing = {
+        id: l.id,
+        asset_id: l.asset_id,
+        seller_id: l.seller_id,
+        title: l.title,
+        image_url: l.user_assets?.image_url || null, // Get image_url from joined user_assets
+        price_cents: l.price_cents,
+        status: l.status,
+        created_at: l.created_at
+      }
+      listingBySource.set(l.asset_id, transformedListing)
+    }
 
     // 1) Start with all assets (public and private)
     const merged = new Map<string, UIItem>()
@@ -190,7 +215,7 @@ export default function SellerGalleryPage() {
         merged.set(`listing:${l.id}`, {
           id: `listing:${l.id}`,
           file_name: l.title,
-          image_url: l.image_url || '/placeholder.svg',
+          image_url: l.user_assets?.image_url || '/placeholder.svg', // Get image_url from joined user_assets
           is_listed: true,
           price_cents: l.price_cents,
           listing_id: l.id,
