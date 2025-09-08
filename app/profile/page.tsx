@@ -1413,6 +1413,9 @@ const generations = useMemo(
   /* ───── fetchFirstPage / loadMore now SELECT source_type ───── */
   async function fetchFirstPage(userId: string) {
     setLoadingAssets(true)
+    setOffset(PAGE_SIZE) // Set initial offset for next load
+    setHasMore(true) // Reset hasMore state
+    
     const { data } = await supabase
       .from("user_assets")
       .select(
@@ -1425,6 +1428,11 @@ const generations = useMemo(
 
     const assets = (data ?? []).map(toUI)
     setAssets(assets)
+    
+    // If we got fewer items than PAGE_SIZE, there are no more items
+    if (!data || data.length < PAGE_SIZE) {
+      setHasMore(false)
+    }
     
     // Fetch listing information for these assets
     fetchSellerListings(userId, assets.map(a => a.id))
@@ -1446,7 +1454,18 @@ const generations = useMemo(
       .range(offset, offset + PAGE_SIZE - 1)
       .returns<AssetRow[]>()
 
-    if (data) setAssets((prev) => [...prev, ...data.map(toUI)])
+    if (data) {
+      setAssets((prev) => [...prev, ...data.map(toUI)])
+      // Update offset for next load
+      setOffset(prev => prev + PAGE_SIZE)
+      // If we got fewer items than PAGE_SIZE, there are no more items
+      if (data.length < PAGE_SIZE) {
+        setHasMore(false)
+      }
+    } else {
+      // No data returned, no more items
+      setHasMore(false)
+    }
     setLoadingMore(false)
   }, [uid, offset, loadingMore, supabase])
 

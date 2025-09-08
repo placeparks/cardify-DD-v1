@@ -144,15 +144,19 @@ export default function SellerGalleryPage() {
       })
     }
 
-    // ALL uploads by this seller (public and private)
+    // ALL uploads by this seller (public and private) - exclude items under review
     const { data: allAssets } = await supabase
       .from('user_assets')
-      .select('id, user_id, title, image_url, storage_path, mime_type, file_size_bytes, created_at, is_public') // Updated column names
+      .select(`
+        id, user_id, title, image_url, storage_path, mime_type, file_size_bytes, created_at, is_public,
+        duplicate_detections!left(status)
+      `) // Join with duplicate_detections to check review status
       .eq('user_id', sellerId) // Updated column name
+      .not('duplicate_detections.status', 'eq', 'pending') // Exclude items under review
       .order('created_at', { ascending: false })
       .returns<AssetRow[]>()
 
-    // ALL listings by this seller (active and inactive)
+    // ALL listings by this seller (active and inactive) - exclude items under review
     const { data: listings } = await supabase
       .from('marketplace_listings') // Updated table name
       .select(`
@@ -165,10 +169,12 @@ export default function SellerGalleryPage() {
         created_at,
         user_assets!inner(
           image_url,
-          title
+          title,
+          duplicate_detections!left(status)
         )
-      `) // Updated to use JOIN with user_assets
+      `) // Updated to use JOIN with user_assets and duplicate_detections
       .eq('seller_id', sellerId)
+      .not('user_assets.duplicate_detections.status', 'eq', 'pending') // Exclude items under review
       .order('created_at', { ascending: false })
       .returns<any[]>()
 
