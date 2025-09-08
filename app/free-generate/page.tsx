@@ -694,7 +694,7 @@ useEffect(() => {
   return () => { if (chan) sb.removeChannel(chan) }
 }, [deviceId, user?.id])        
 
-  /* ─────────────────────────── guest free quota (3) ────────────────────────── */
+  /* ─────────────────────────── guest free quota (1) ────────────────────────── */
 
   const [remainingGenerations, setRemainingGenerations] = useState(FREE_LIMIT);
 
@@ -1252,7 +1252,7 @@ const handleGenerate = async (): Promise<void> => {
    },
  );
 
-        setUploadedImageUrl(publicUrl);
+        setUploadedImageUrl(publicUrl ?? null);
         await track("generate", { action: "upload_ok" });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1343,7 +1343,7 @@ const handleGenerate = async (): Promise<void> => {
           },
         },
       );
-      setUploadedImageUrl(publicUrl);
+      setUploadedImageUrl(publicUrl ?? null);
       setShowCheckoutModal(true);
     } catch (e: any) {
       setUploadError("Failed to prepare image for checkout");
