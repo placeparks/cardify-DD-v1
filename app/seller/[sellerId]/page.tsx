@@ -144,19 +144,15 @@ export default function SellerGalleryPage() {
       })
     }
 
-    // ALL uploads by this seller (public and private) - exclude items under review
+    // ALL uploads by this seller (public and private)
     const { data: allAssets } = await supabase
       .from('user_assets')
-      .select(`
-        id, user_id, title, image_url, storage_path, mime_type, file_size_bytes, created_at, is_public,
-        duplicate_detections!left(status)
-      `) // Join with duplicate_detections to check review status
+      .select('id, user_id, title, image_url, storage_path, mime_type, file_size_bytes, created_at, is_public') // Updated column names
       .eq('user_id', sellerId) // Updated column name
-      .not('duplicate_detections.status', 'eq', 'pending') // Exclude items under review
       .order('created_at', { ascending: false })
       .returns<AssetRow[]>()
 
-    // ALL listings by this seller (active and inactive) - exclude items under review
+    // ALL listings by this seller (active and inactive)
     const { data: listings } = await supabase
       .from('marketplace_listings') // Updated table name
       .select(`
@@ -169,18 +165,33 @@ export default function SellerGalleryPage() {
         created_at,
         user_assets!inner(
           image_url,
-          title,
-          duplicate_detections!left(status)
+          title
         )
-      `) // Updated to use JOIN with user_assets and duplicate_detections
+      `) // Updated to use JOIN with user_assets
       .eq('seller_id', sellerId)
-      .not('user_assets.duplicate_detections.status', 'eq', 'pending') // Exclude items under review
       .order('created_at', { ascending: false })
       .returns<any[]>()
+
+    // Get duplicate detection status for all assets
+    const assetIds = [...(allAssets ?? []).map(a => a.id), ...(listings ?? []).map(l => l.asset_id)]
+    const { data: duplicateDetections } = await supabase
+      .from('duplicate_detections')
+      .select('asset_id, status')
+      .in('asset_id', assetIds)
+      .eq('status', 'pending')
+
+    // Create a set of asset IDs that are under review
+    const underReviewAssetIds = new Set((duplicateDetections ?? []).map(d => d.asset_id))
+
+    // Filter out assets that are under review
+    const filteredAssets = (allAssets ?? []).filter(asset => !underReviewAssetIds.has(asset.id))
 
     // Index listings by asset id
     const listingBySource = new Map<string, any>()
     for (const l of listings ?? []) {
+      // Skip listings for assets that are under review
+      if (underReviewAssetIds.has(l.asset_id)) continue
+      
       // Transform the joined data to match our expected structure
       const transformedListing = {
         id: l.id,
@@ -195,9 +206,9 @@ export default function SellerGalleryPage() {
       listingBySource.set(l.asset_id, transformedListing)
     }
 
-    // 1) Start with all assets (public and private)
+    // 1) Start with filtered assets (public and private, excluding under review)
     const merged = new Map<string, UIItem>()
-    for (const a of allAssets ?? []) {
+    for (const a of filteredAssets) {
       const fileName = (a.title && a.title.trim()) || a.storage_path?.split('/').pop() || 'file'
       const l = listingBySource.get(a.id)
       merged.set(a.id, {
